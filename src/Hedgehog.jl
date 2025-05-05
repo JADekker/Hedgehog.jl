@@ -59,7 +59,7 @@ export yearfrac, add_yearfrac
 export VanillaOption, European, American, Spot, Forward, Call, Put, parity_transform
 
 # Market data
-export BlackScholesInputs, AbstractMarketInputs, HestonInputs
+export BlackScholesInputs, AbstractMarketInputs, HestonInputs, MertonInputs
 export RateCurve,
     df,
     zero_rate,

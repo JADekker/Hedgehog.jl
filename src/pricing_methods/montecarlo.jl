@@ -169,6 +169,34 @@ function sde_problem(
 end
 
 """
+    sde_problem(problem::PricingProblem, ::LognormalDynamics, ::EulerMaruyama)
+
+Constructs a `LogGBMJProblem` for Euler-Maruyama simulation of Merton dynamics.
+"""
+function sde_problem(
+    problem::PricingProblem{Payoff, Inputs},
+    ::LognormalDynamics,
+    ::EulerMaruyama,
+    ) where {Payoff, Inputs <: MertonInputs}
+
+    m = problem.market_inputs
+    T = yearfrac(m.referenceDate, problem.payoff.expiry)
+    tspan = (0.0, T)
+
+    rate = zero_rate(m.rate, 0.0)
+    σ = get_vol(m.sigma, nothing, nothing)
+    S₀ = m.spot
+
+    λ = m.lambda
+    μⱼ = m.mu_jump
+    σⱼ = m.sigma_jump
+
+    rate, σ, S₀, λ, μⱼ, σⱼ = promote(rate, σ, S₀, λ, μⱼ, σⱼ)
+
+    return LogGBMJProblem(rate, σ, λ, μⱼ, σⱼ, log(S₀), tspan)
+end
+
+"""
     sde_problem(problem::PricingProblem, ::HestonDynamics, ::EulerMaruyama)
 
 Constructs a `HestonProblem` for Euler-Maruyama simulation of the Heston model.

@@ -86,3 +86,5 @@ HestonInputs(reference_date::TimeType, rate::Real, spot, V0, κ, θ, σ, ρ) = H
     σ,
     ρ,
 )
+
+include("merton.jl")

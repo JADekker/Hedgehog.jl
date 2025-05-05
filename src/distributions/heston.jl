@@ -70,7 +70,6 @@ function LogGBMProblem!(μ, σ, u0, tspan; seed = UInt64(0), kwargs...)
     )
 end
 
-
 """
     HestonNoise(μ, κ, θ, σ, ρ, t0, W0, Z0=nothing; kwargs...)
 
