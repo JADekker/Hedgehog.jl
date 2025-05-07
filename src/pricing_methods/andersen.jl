@@ -10,10 +10,33 @@ Uses a time-varying barrier to determine approximate optimal stopping times.
 # Fields
 - `mc_method`: A `MonteCarlo` method specifying dynamics and simulation strategy.
 - `degree`: Degree of the polynomial basis for regression.
+- `policy`: The policy type. Currently, `AndersenPolicy1` and `AndersenPolicy2` corresponding to (9) and (10) in Andersen (2000) are implemented.
 """
-struct LSM{M<:MonteCarlo} <: AbstractPricingMethod
+struct Andersen{M<:MonteCarlo,T<:AndersenPolicy} <: AbstractPricingMethod
     mc_method::M
     degree::Int  # degree of polynomial basis
+    policy::T
+end
+
+"""
+    AndersenSolution{T <: Number,TEl, P<:PricingProblem, M <: AbstractPricingMethod} <: AbstractPricingSolution
+
+Represents a pricing solution obtained using the Andersen method
+typically applied to American-style options via Monte Carlo simulation.
+
+# Fields
+- `problem::P`: The pricing problem definition (`<: PricingProblem`), usually involving early exercise features.
+- `method::M`: The specific Andersen configuration (`<: AbstractPricingMethod`), which carries the estimated coefficients. 
+- `price::T`: The calculated numerical price (`<: Number`).
+- `stopping_info::Vector{Tuple{Int,S}}`: Information related to the derived optimal stopping (exercise) rule at different time steps. Often contains time indices and associated data `S` (e.g., regression coefficients, exercise boundaries).
+- `spot_paths::Matrix{TEl}`: The matrix of simulated underlying asset price paths used in the Andersen algorithm. `TEl` is the element type of the path values.
+"""
+struct AndersenSolution{T <: Number, S, TEl, P<:PricingProblem, M <: AbstractPricingMethod} <: AbstractPricingSolution
+    problem::P
+    method::M
+    price::T
+    stopping_info::Vector{Tuple{Int,S}}
+    spot_paths::Matrix{TEl}
 end
 
 """ 
@@ -31,23 +54,13 @@ end
 
 The second Andersen policy computes a time-varying barrier H but also requires the exercise value to exceed the maximum of the implied future Euroopean option prices. 
 """
-struct AndersenPolicy2{TPricing<:PricingProblem, TMethod<:AbstractPricingMethod} <: AndersenPolicy 
-    pricing_problem::TPricing
-    method::TMethod
-end
-struct AndersenPolicy2Est{T,TPricing<:PricingProblem, TMethod<:AbstractPricingMethod} <: AndersenPolicy
-    boundary::Vector{T}
-    pricing_problem::TPricing
-    method::TMethod
-end
-
-error("WORK ON THIRD POLICY!")
-
+struct AndersenPolicy2 <: AndersenPolicy end
+struct AndersenPolicy2Est <: AndersenPolicy boundary::Vector{T} end
 
 """
-    LSM(dynamics::PriceDynamics, strategy::SimulationStrategy, config::SimulationConfig, degree::Int)
+    Andersen(dynamics::PriceDynamics, strategy::SimulationStrategy, config::SimulationConfig, degree::Int)
 
-Constructs an `LSM` pricing method with polynomial regression and Monte Carlo simulation.
+Constructs an `Andersen` pricing method with polynomial regression and Monte Carlo simulation.
 
 # Arguments
 - `dynamics`: Price dynamics.
@@ -56,80 +69,29 @@ Constructs an `LSM` pricing method with polynomial regression and Monte Carlo si
 - `degree`: Degree of polynomial regression.
 
 # Returns
-- An `LSM` instance.
+- An `Andersen` instance.
 """
-function LSM(dynamics::PriceDynamics, strategy::SimulationStrategy, config::SimulationConfig, degree::Int)
+function Andersen(dynamics::PriceDynamics, policy::AndersenPolicy, strategy::SimulationStrategy, config::SimulationConfig, degree::Int)
     mc = MonteCarlo(dynamics, strategy, config)
-    return LSM(mc, degree)
+    return Andersen(mc, degree, policy)
 end
 
 """
-    extract_spot_grid(sol::EnsembleSolution)
+    solve(prob::PricingProblem, method::Andersen)
 
-Extracts the simulated spot paths from an `EnsembleSolution`.
-
-# Arguments
-- `sol`: The ensemble simulation result.
-
-# Returns
-- A matrix of spot values of size `(nsteps, npaths)`.
-"""
-function extract_spot_grid(sol::EnsembleSolution)
-    npaths = length(sol.u)
-    nsteps = length(sol.u[1].t)
-    spot_grid = Matrix{eltype(sol.u[1].u[1][1])}(undef, nsteps, npaths)
-
-    @inbounds for j in 1:npaths
-        @views spot_grid[:, j] = getindex.(sol.u[j].u, 1)
-    end
-
-    return spot_grid
-end
-
-"""
-    extract_spot_grid(sol_anti::Tuple{EnsembleSolution, EnsembleSolution})
-
-Extracts spot paths from a pair of ensemble simulations with antithetic variates.
-
-# Arguments
-- `sol_anti`: Tuple of original and antithetic ensemble simulations.
-
-# Returns
-- A matrix of spot values of size `(nsteps, 2 * npaths)`.
-"""
-function extract_spot_grid(sol_anti::Tuple{EnsembleSolution,EnsembleSolution})
-    sol, antithetic = sol_anti
-    npaths = length(sol.u)
-    nsteps = length(sol.u[1].t)
-    spot_grid = Matrix{eltype(sol.u[1].u[1][1])}(undef, nsteps, 2 * npaths)
-
-    @inbounds for j in 1:npaths
-        @views spot_grid[:, j] = getindex.(sol.u[j].u, 1)
-    end
-
-    @inbounds for k in (npaths + 1):(2 * npaths)
-        @views spot_grid[:, k] = getindex.(antithetic.u[k - npaths].u, 1)
-    end
-
-    return spot_grid
-end
-
-"""
-    solve(prob::PricingProblem, method::LSM)
-
-Prices an American option using the Least Squares Monte Carlo method.
+Prices an American option using the Andersen method.
 
 # Arguments
 - `prob`: A `PricingProblem` containing an American `VanillaOption`.
-- `method`: An `LSM` pricing method.
+- `method`: An `Andersen` pricing method.
 
 # Returns
-- An `LSMSolution` containing price and stopping strategy.
+- An `AndersenSolution` containing price and stopping strategy.
 """
 function solve(
     prob::PricingProblem{VanillaOption{TS,TE,American,C,S},I},
-    method::L,
-) where {TS,TE,I<:AbstractMarketInputs,C,S, L<:LSM}
+    method::A,
+) where {TS,TE,I<:AbstractMarketInputs,C,S, A<:Andersen}
 
     T = yearfrac(prob.market_inputs.referenceDate, prob.payoff.expiry)
     sde_prob = sde_problem(prob, method.mc_method.dynamics, method.mc_method.strategy)
@@ -141,6 +103,8 @@ function solve(
 
     stopping_info = [(nsteps, prob.payoff(spot_grid[nsteps+1, p])) for p = 1:npaths]
 
+    # We need to begin by computing European option prices at every time step; how to do this efficiently? 
+    estimated_H = Vector{eltype(spot_grid)}(undef, nsteps-1)
     for i = nsteps:-1:2
         t = i - 1
 
@@ -149,47 +113,32 @@ function solve(
 
         payoff_t = prob.payoff.(spot_grid[i, :])
         in_the_money = findall(payoff_t .> 0)
+
         isempty(in_the_money) && continue
-
-        x = spot_grid[i, in_the_money]
-        y = continuation[in_the_money]
-        poly = Polynomials.fit(x, y, method.degree)
-        cont_value = map(poly, x)
-
-        update_stopping_info!(stopping_info, in_the_money, cont_value, payoff_t, t)
+        update_stopping_info!(estimated_H, stopping_info, method.policy, in_the_money, continuation, payoff_t, spot_grid[i, :], t)
     end
 
     discounted_values = [discount^t * val for (t, val) in stopping_info]
     price = mean(discounted_values)
 
-    return LSMSolution(prob, method, price, stopping_info, spot_grid)
+    return AndersenSolution(prob, Andersen(method.mc_method, method.degree, estimate_andersen_policy(method.policy, estimated_H)), price, stopping_info, spot_grid)
 end
 
-"""
-    update_stopping_info!(
-        stopping_info::Vector{Tuple{Int, U}},
-        paths::Vector{Int},
-        cont_value::Vector{T},
-        payoff_t::Vector{S},
-        t::Int
-    )
-
-Updates the stopping times and values in-place based on immediate vs. continuation value comparison.
-
-# Arguments
-- `stopping_info`: Current best (time, value) for each path.
-- `paths`: Indices of in-the-money paths.
-- `cont_value`: Estimated continuation values.
-- `payoff_t`: Immediate exercise values.
-- `t`: Current time index.
-"""
 function update_stopping_info!(
+    estimated_H,
     stopping_info::Vector{Tuple{Int,U}},
+    policy::AndersenPolicy1,
     paths::Vector{Int},
     cont_value::Vector{T},
     payoff_t::Vector{S},
+    spot_grid,
     t::Int,
 ) where {T,S,U}
+    display(policy)
+    display(estimated_H)
+    display(t)
+    #value_from_H = h -> sum(payoff_t[p] for p in paths if payoff_t[p] > )
+    error()
     exercise = payoff_t[paths] .> cont_value
     stopping_info[paths[exercise]] .= [(t, payoff_t[p]) for p in paths[exercise]]
 end
